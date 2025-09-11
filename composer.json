@@ -1,0 +1,8 @@
+{
+    "name": "luckywave/mysqldumps3",
+    "require": {
+        "ifsnop/mysqldump-php": "^2.12",
+        "aws/aws-sdk-php": "^3.337",
+        "vlucas/phpdotenv": "^5.6"
+    }
+}
