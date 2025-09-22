@@ -4,12 +4,12 @@
 
     use Ifsnop\Mysqldump as IMysqldump;
     use Dotenv\Dotenv;
+    use Aws\Common\Aws;
 
     function exportDatabase($db, $filename)
     {
         try {
             $sqlfile = sprintf(__DIR__ . "/dumps/%s/%s.sql", date('Ymd'), $filename);
-            echo "> Export To .sql...";
             $directory = dirname($sqlfile);
             if (!is_dir($directory)) {
                 mkdir($directory, 0755, true);
@@ -20,12 +20,10 @@
                 $_ENV['DB_PASSWORD']
             );
             $dump->start($sqlfile);
-            echo "\033[32m[OK]\033[0m\r\n";
 
             return $sqlfile;
-        } catch (Throwable $e) {
-            echo "\033[31m[ERR]{$e->getMessage()}\033[0m\r\n";
-            return false;
+        } catch (\Exception $e) {
+            throw new RuntimeException("匯出失敗。", 0, $e);
         }
     }
 
@@ -35,31 +33,27 @@
             $directory = dirname($sqlfile);
             preg_match('/^(?<filename>.+)\.sql$/', basename($sqlfile), $matches);
             $zipfile = rtrim($directory, '/') . "/{$matches['filename']}.zip";
-            echo "> Compress To .zip...";
             $zipArchive = new \ZipArchive();
             if (!$zipArchive->open($zipfile, ZipArchive::CREATE | ZipArchive::OVERWRITE)) {
-                throw new RuntimeException("壓縮檔建立失敗");
+                throw new RuntimeException(basename($zipfile) ." cant open.");
             } elseif (!$zipArchive->addFile($sqlfile, basename($sqlfile))) {
                 $zipArchive->close();
                 unlink($zipfile);
-                throw new RuntimeException("添加檔案失敗");
+                throw new RuntimeException(basename($zipfile) ." add file failed.");
             }
             $zipArchive->close();
             unlink($sqlfile);
-            echo "\033[32m[OK]\033[0m\r\n";
 
             return $zipfile;
         } catch (Throwable $e) {
-            echo "\033[31m[ERR]{$e->getMessage()}\033[0m\r\n";
-            return false;
+            throw new RuntimeException("壓縮失敗。", 0, $e);
         }
     }
 
     function uploadBackupFile($zipfile)
     {
         try {
-            echo "> Upload To S3...";
-            $s3 = new \Aws\S3\S3Client([
+            $s3 = Aws::factory([
                 'version' => 'latest',
                 'region'  => $_ENV['AWS_S3_REGION'],
                 'credentials' => [
@@ -67,7 +61,7 @@
                     'key' => $_ENV['AWS_S3_KEY']
                 ],
                 'suppress_php_deprecation_warning' => true,
-            ]);
+            ])->get('s3');
             $s3->putObject([
                 'Bucket' => $_ENV['AWS_S3_BUCKET'],
                 'Key'   => sprintf("mysqldumps/%s/%s", date('Ymd'), basename($zipfile)),
@@ -76,20 +70,16 @@
             if ($_ENV['KEEP_LOCAL_BACKUP'] !== 'true') {
                 unlink($zipfile);
             }
-            echo "\033[32m[OK]\033[0m\r\n";
 
             return true;
         } catch (Throwable $e) {
-            echo "\033[31m[ERR]{$e->getMessage()}\033[0m\r\n";
-            return false;
+            throw new RuntimeException("上傳失敗。", 0, $e);
         }
     }
 
     function notify($domain)
     {
         try {
-            echo "> Notify TO LuckyWave...";
-
             // 初始化 cURL
             $ch = curl_init($_ENV['NOTIFY_URL']);
 
@@ -125,46 +115,35 @@
             if ($httpCode !== 200) {
                 throw new \Exception($response);
             }
-
-            echo "\033[32m[OK]\033[0m\r\n";
         } catch (Throwable $e) {
-            echo "\033[31m[ERR]{$e->getMessage()}\033[0m\r\n";
+            throw new RuntimeException("通知失敗。", 0, $e);
         }
     }
 
-    try {
-        $dotenv = Dotenv::createImmutable(__DIR__);
-        $dotenv->load();
-        $files = glob(__DIR__ . '/conf/*.json');
-        $files = array_filter($files, function ($file) {
-            return basename($file) !== 'example.json';
-        });
-        $configs = array_map(function ($file) {
-            $config = json_decode(file_get_contents($file), true);
-            if (is_null($config)) {
-                throw new RuntimeException("{$file} 解析失敗。");
-            }
-
-            return $config;
-        }, $files);
-        foreach ($configs as $config) {
-            echo "========== {$config['database']} ==========\r\n";
-            // 匯出 .sql
-            $sqlfile = exportDatabase($config['database'], $config['backup_name']);
-            if ($sqlfile === false) continue;
-
-            // 壓縮 .zip
-            $zipfile = compressSqlFile($sqlfile);
-            if ($zipfile === false) continue;
-
-
-            # 上傳 zip 到 S3
-            uploadBackupFile($zipfile);
-
-
-            notify($config['notify_name']);
+    $dotenv = Dotenv::create(__DIR__);
+    $dotenv->load();
+    $files = glob(__DIR__ . '/conf/*.json');
+    $files = array_filter($files, function ($file) {
+        return basename($file) !== 'example.json';
+    });
+    $configs = array_map(function ($file) {
+        $config = json_decode(file_get_contents($file), true);
+        if (is_null($config)) {
+            throw new RuntimeException("{$file} 解析失敗。");
         }
-    } catch (Throwable $e) {
-        echo sprintf("Exception '%s' with message '%s' thrown from %s:%d", get_class($e), $e->getMessage(), $e->getFile(), $e->getLine());
+
+        return $config;
+    }, $files);
+    foreach ($configs as $config) {
+        try {
+            echo "> Export {$config['database']}...";
+            $sqlfile = exportDatabase($config['database'], $config['backup_name']);
+            $zipfile = compressSqlFile($sqlfile);
+            uploadBackupFile($zipfile);
+            notify($config['notify_name']);
+            echo "\033[32m[OK]\033[0m\r\n";
+        } catch (\Exception $e) {
+            echo "\033[31m[ERR]{$e->getMessage()}\033[0m\r\n";
+        }
     }
 
