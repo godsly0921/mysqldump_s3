@@ -116,11 +116,11 @@
                 uploadBackupFile($zipfile);
                 notify($config['notify_name']);
                 echo "\033[32m[OK]\033[0m\r\n";
-            } catch (Throwable $e) {
+            } catch (Exception $e) {
                 echo "\033[31m[ERR]{$e->getMessage()}\033[0m\r\n";
             }
         }
-    } catch (Throwable $e) {
+    } catch (Exception $e) {
         echo sprintf("Exception '%s' with message '%s' thrown from %s:%d", get_class($e), $e->getMessage(), $e->getFile(), $e->getLine());
     }
 
