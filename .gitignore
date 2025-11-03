@@ -1,5 +1,3 @@
-.env
-composer.lock
 dumps/
-vendor/
 .idea/
+config.php
