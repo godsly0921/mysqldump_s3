@@ -14,6 +14,11 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# 設定系統與 PHP 時區為 Asia/Taipei
+ENV TZ=Asia/Taipei
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+RUN echo "date.timezone=$TZ" > /usr/local/etc/php/conf.d/timezone.ini
+
 # 安裝 Composer
 # COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
